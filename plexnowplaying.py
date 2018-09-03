@@ -10,6 +10,6 @@ args = parser.parse_args()
 
 # TODO - Validate we got the required args
 
-plex = PlexNowPlaying(args.username, args.password, args.server)
+plex = PlexNowPlaying()
 
 plex.run()

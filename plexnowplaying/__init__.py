@@ -1,10 +1,12 @@
 import base64
 import json
 import logging
+import os
 import sys
 import time
 from urllib.request import Request, urlopen
 
+import requests
 from plexapi.server import PlexServer
 from requests import HTTPError
 
@@ -31,11 +33,36 @@ log.propagate = False
 
 class PlexNowPlaying:
 
-    def __init__(self, username, password, server):
-        self.username = username
-        self.password = password
-        self.server_addr = server
+    # TODO - Convert all HTTP requests to use requests lib
+    def __init__(self):
+        self.token = self.get_auth_token(config.plex_user, config.plex_password)
         self.plex = self.connect_to_server()
+
+
+    def download_album_art(self, url):
+        """
+        Take an Plex URL for album art and download
+        :param url: full Plex URL
+        :return: None
+        """
+        headers = {
+            'X-Plex-Client-Identifier': 'Plex InfluxDB Collector',
+            'X-Plex-Product': 'Plex InfluxDB Collector',
+            'X-Plex-Version': '1',
+            'X-Plex-Token': self.token
+        }
+        log.debug('Attempting to download album art from %s', url)
+        result = requests.get(url, headers=headers)
+        if result.status_code != 200:
+            log.error('Error getting album art.  Unexpected response code %s', result.status_code)
+            return
+
+        try:
+            with open(os.path.join(config.monitor_directory, 'art.png'), 'wb') as f:
+                f.write(result.content)
+            log.debug('Successfully saved album art')
+        except Exception as e:
+            log.exception('Failed to save album art', exc_info=True)
 
     def get_now_playing(self):
         """
@@ -47,17 +74,19 @@ class PlexNowPlaying:
         log.debug('Loaded %s active streams', len(sessions))
         for stream in sessions:
             user = stream.usernames[0]
-            player = stream.players[0]
             if stream.type != 'track':
                 log.debug('Skipping media type %s: %s', stream.type, stream.title)
                 continue
-            elif self.username != user:
+            elif config.plex_user != user:
                 log.debug('Skipping music played by different user (%s)', user)
 
             result['artist'] = stream.grandparentTitle
             result['album'] = stream.parentTitle
             result['title'] = stream.title
-            result['art'] = stream.parentThumb
+            if stream.parentThumb:
+                result['art'] = 'http://{}:32400{}'.format(config.plex_server, stream.parentThumb)
+            else:
+                result['art'] = None
             break
         log.debug('Now Playing %s', result)
         return result
@@ -69,29 +98,54 @@ class PlexNowPlaying:
         :return: None
         """
         out_string = '{} - {}'.format(data['artist'], data['title'])
+        now_playing = os.path.join(config.monitor_directory, config.playing_file)
         try:
-            with open(config.playing_file, 'w') as f:
+            with open(now_playing, 'w') as f:
                 f.write(out_string)
                 log.debug('Successfully wrote now playing file')
         except Exception as e:
             log.exception('Failed to write now playing file', exc_info=True)
 
-        try:
-            with open(config.art_file, 'w') as f:
-                f.write(data['art'])
-                log.debug('Successfully wrote now art file')
-        except Exception as e:
-            log.exception('Failed to write art file', exc_info=True)
+        if data['art']:
+            self.download_album_art(data['art'])
+
 
 
     def format_now_playing(self):
         pass
 
     def connect_to_server(self):
-        base_url = 'http://{}:32400'.format(self.server_addr)
-        plex = PlexServer(base_url, self.get_auth_token(self.username, self.password))
+        if not self.token:
+            log.error('No API token currently set')
+            return
+        base_url = 'http://{}:32400'.format(config.plex_server)
+        plex = PlexServer(base_url, self.get_auth_token(config.plex_user, config.plex_password))
 
         return plex
+
+    def _set_default_headers(self, req, token=None):
+        """
+        Sets the default headers need for a request
+        :param req:
+        :return: request
+        """
+
+        log.debug('Adding Request Headers')
+
+        headers = {
+            'X-Plex-Client-Identifier': 'Plex InfluxDB Collector',
+            'X-Plex-Product': 'Plex InfluxDB Collector',
+            'X-Plex-Version': '1',
+            'X-Plex-Token': token
+        }
+
+        for k, v in headers.items():
+            if k == 'X-Plex-Token' and not token:  # Don't add token if we don't have it yet
+                continue
+
+            req.add_header(k, v)
+
+        return req
 
     def get_auth_token(self, username, password):
         """
@@ -106,16 +160,7 @@ class PlexNowPlaying:
         auth_string = '{}:{}'.format(username, password)
         base_auth = base64.encodebytes(bytes(auth_string, 'utf-8'))
         req = Request('https://plex.tv/users/sign_in.json')
-
-        headers = {
-            'X-Plex-Client-Identifier': 'Plex InfluxDB Collector',
-            'X-Plex-Product': 'Plex InfluxDB Collector',
-            'X-Plex-Version': '1',
-        }
-
-        for k, v in headers.items():
-            req.add_header(k, v)
-
+        req = self._set_default_headers(req)
         req.add_header('Authorization', 'Basic {}'.format(base_auth[:-1].decode('utf-8')))
 
         try:
@@ -134,10 +179,12 @@ class PlexNowPlaying:
 
         # Make sure we actually got a token back
         if 'authToken' in output['user']:
+            log.debug('Successfully Retrieved Auth Token')
             return output['user']['authToken']
         else:
             print('Something Broke \n We got a valid response but for some reason there\'s no auth token')
             sys.exit(1)
+
 
     def run(self):
         while True:

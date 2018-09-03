@@ -27,6 +27,7 @@ class ConfigManager:
 
         # General
         self.delay = self.config['GENERAL'].getint('Delay', fallback=2)
+        self.monitor_directory = self.config['GENERAL']['Monitor_Directory']
         self.playing_file = self.config['GENERAL']['Playing_File']
         self.art_file = self.config['GENERAL']['Art_File']
 
