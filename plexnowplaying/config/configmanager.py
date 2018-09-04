@@ -27,9 +27,9 @@ class ConfigManager:
 
         # General
         self.delay = self.config['GENERAL'].getint('Delay', fallback=2)
-        self.monitor_directory = self.config['GENERAL']['Monitor_Directory']
-        self.playing_file = self.config['GENERAL']['Playing_File']
-        self.art_file = self.config['GENERAL']['Art_File']
+        self.output_dir = self.config['GENERAL']['Monitor_Directory']
+        self.playing_file = self.config['GENERAL'].get('Playing_File', fallback='now_playing.txt')
+        self.art_file = self.config['GENERAL'].get('Art_File', fallback='album_art.png')
         self.thumb_size = self.config['GENERAL'].getint('Thumb_Size', fallback=500)
 
         # Plex

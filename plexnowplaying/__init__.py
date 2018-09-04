@@ -37,7 +37,7 @@ class PlexNowPlaying:
 
     # TODO - Convert all HTTP requests to use requests lib
     def __init__(self):
-        # TODO - Dirty dirty, fix this at some point
+        # TODO - Dirty dirty, fix this at some point.  Need to revist token handling
         self.token = None
         self.token = self.get_auth_token(config.plex_user, config.plex_password)
         self.plex = self.connect_to_server()
@@ -48,14 +48,14 @@ class PlexNowPlaying:
         :param url: full Plex URL
         :return: None
         """
-        headers = self.get_default_headers()
+        headers = self.get_default_headers(token=self.token)
         log.debug('Attempting to download album art from %s', url)
         result = requests.get(url, headers=headers)
         if result.status_code != 200:
             log.error('Error getting album art.  Unexpected response code %s', result.status_code)
             return
 
-        file_name = os.path.join(config.monitor_directory, 'art_orig.png')
+        file_name = os.path.join(config.output_dir, 'art_orig.png')
         try:
             with open(file_name, 'wb') as f:
                 f.write(result.content)
@@ -84,7 +84,7 @@ class PlexNowPlaying:
             except PermissionError as e:
                 log.error('Album art is locked, cannot remove')
 
-            img.save(os.path.join(config.monitor_directory, 'art.png'))
+            img.save(os.path.join(config.output_dir, config.art_file))
             log.debug('Resized provided album art')
         else:
             log.error('Provided Album Art path is invalid.  Path: %s', path)
@@ -125,13 +125,14 @@ class PlexNowPlaying:
         :return: None
         """
         out_string = '{} - {}'.format(data['artist'], data['title'])
-        now_playing = os.path.join(config.monitor_directory, config.playing_file)
+        now_playing = os.path.join(config.output_dir, config.playing_file)
 
-        with open(now_playing, 'r') as f:
-            content = f.read()
-            if content == out_string:
-                log.debug('Skipping now playing update')
-                return
+        if os.path.isfile(now_playing):
+            with open(now_playing, 'r') as f:
+                content = f.read()
+                if content == out_string:
+                    log.debug('Skipping now playing update')
+                    return
 
         try:
             with open(now_playing, 'w') as f:
