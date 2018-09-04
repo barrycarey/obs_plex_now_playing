@@ -10,6 +10,7 @@ import requests
 from PIL import Image
 from plexapi.server import PlexServer
 from requests import HTTPError
+from requests.auth import HTTPBasicAuth
 
 from plexnowplaying.config import config
 from plexnowplaying.logfilters import SingleLevelFilter
@@ -36,7 +37,7 @@ class PlexNowPlaying:
 
     # TODO - Convert all HTTP requests to use requests lib
     def __init__(self):
-        self.token = self.get_auth_token(config.plex_user, config.plex_password)
+        self.token = self.get_auth_token_test(config.plex_user, config.plex_password)
         self.plex = self.connect_to_server()
 
 
@@ -58,7 +59,7 @@ class PlexNowPlaying:
             log.error('Error getting album art.  Unexpected response code %s', result.status_code)
             return
 
-        file_name = os.path.join(config.monitor_directory, 'art.png')
+        file_name = os.path.join(config.monitor_directory, 'art_orig.png')
         try:
             with open(file_name, 'wb') as f:
                 f.write(result.content)
@@ -73,7 +74,6 @@ class PlexNowPlaying:
         :param path: str - Path to file
         :return: None
         """
-        size = config.thumb_size, config.thumb_size
         if os.path.isfile(path):
             # TODO - Exceptions
             img = Image.open(path)
@@ -88,11 +88,10 @@ class PlexNowPlaying:
             except PermissionError as e:
                 log.error('Album art is locked, cannot remove')
 
-            img.save(path)
+            img.save(os.path.join(config.monitor_directory, 'art.png'))
             log.debug('Resized provided album art')
         else:
             log.error('Provided Album Art path is invalid.  Path: %s', path)
-
 
     def get_now_playing(self):
         """
@@ -141,8 +140,6 @@ class PlexNowPlaying:
         if data['art']:
             self.download_album_art(data['art'])
 
-
-
     def format_now_playing(self):
         pass
 
@@ -178,6 +175,26 @@ class PlexNowPlaying:
             req.add_header(k, v)
 
         return req
+
+    def get_auth_token_test(self, username, password):
+        headers = {
+            'X-Plex-Client-Identifier': 'Plex InfluxDB Collector',
+            'X-Plex-Product': 'Plex InfluxDB Collector',
+            'X-Plex-Version': '1'
+        }
+
+        try:
+            r = requests.post('https://plex.tv/users/sign_in.json', headers=headers, auth=HTTPBasicAuth(config.plex_user, config.plex_password))
+        except Exception as e:
+            # TODO - More Specific exception
+            log.exception('Error getting auth token', exc_info=True)
+            return
+
+        if r.status_code != 201:
+            log.error('Unexpected response code from Plex API. Response Code %s', r.status_code)
+            return
+
+        return json.loads(r.text)['user']['authToken']
 
     def get_auth_token(self, username, password):
         """
@@ -219,6 +236,8 @@ class PlexNowPlaying:
 
 
     def run(self):
+
+        #self.get_auth_token_test(config.plex_user, config.plex_password)
         while True:
             now_playing = self.get_now_playing()
             if now_playing:
