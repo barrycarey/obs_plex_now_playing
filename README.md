@@ -1,4 +1,4 @@
-**Plex Data Collector For InfluxDB**
+**Plex Now Playing For OBS**
 ------------------------------
 
 A tool to pull the currently playing song and album art from Plex and save to a file.  Perfect for use with OBS for streaming 
