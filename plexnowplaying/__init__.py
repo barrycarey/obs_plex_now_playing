@@ -7,6 +7,7 @@ import time
 from urllib.request import Request, urlopen
 
 import requests
+from PIL import Image
 from plexapi.server import PlexServer
 from requests import HTTPError
 
@@ -57,12 +58,41 @@ class PlexNowPlaying:
             log.error('Error getting album art.  Unexpected response code %s', result.status_code)
             return
 
+        file_name = os.path.join(config.monitor_directory, 'art.png')
         try:
-            with open(os.path.join(config.monitor_directory, 'art.png'), 'wb') as f:
+            with open(file_name, 'wb') as f:
                 f.write(result.content)
             log.debug('Successfully saved album art')
+            self.resize_album_art(file_name)
         except Exception as e:
             log.exception('Failed to save album art', exc_info=True)
+
+    def resize_album_art(self, path):
+        """
+        Resize the downloaded album art to ensure consistent size in OBS
+        :param path: str - Path to file
+        :return: None
+        """
+        size = config.thumb_size, config.thumb_size
+        if os.path.isfile(path):
+            # TODO - Exceptions
+            img = Image.open(path)
+            # TODO - Refactor - Taken from https://opensource.com/life/15/2/resize-images-python
+            basewidth = config.thumb_size
+            wpercent = (basewidth / float(img.size[0]))
+            hsize = int((float(img.size[1]) * float(wpercent)))
+            img = img.resize((basewidth, hsize), Image.ANTIALIAS)
+
+            try:
+                os.remove(path)
+            except PermissionError as e:
+                log.error('Album art is locked, cannot remove')
+
+            img.save(path)
+            log.debug('Resized provided album art')
+        else:
+            log.error('Provided Album Art path is invalid.  Path: %s', path)
+
 
     def get_now_playing(self):
         """
@@ -85,6 +115,8 @@ class PlexNowPlaying:
             result['title'] = stream.title
             if stream.parentThumb:
                 result['art'] = 'http://{}:32400{}'.format(config.plex_server, stream.parentThumb)
+            elif stream.grandparentThumb:
+                result['art'] = 'http://{}:32400{}'.format(config.plex_server, stream.grandparentThumb)
             else:
                 result['art'] = None
             break

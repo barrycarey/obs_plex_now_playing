@@ -30,6 +30,7 @@ class ConfigManager:
         self.monitor_directory = self.config['GENERAL']['Monitor_Directory']
         self.playing_file = self.config['GENERAL']['Playing_File']
         self.art_file = self.config['GENERAL']['Art_File']
+        self.thumb_size = self.config['GENERAL'].getint('Thumb_Size', fallback=500)
 
         # Plex
         self.plex_user = self.config['PLEX']['Username']
