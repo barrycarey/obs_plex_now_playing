@@ -37,9 +37,10 @@ class PlexNowPlaying:
 
     # TODO - Convert all HTTP requests to use requests lib
     def __init__(self):
-        self.token = self.get_auth_token_test(config.plex_user, config.plex_password)
+        # TODO - Dirty dirty, fix this at some point
+        self.token = None
+        self.token = self.get_auth_token(config.plex_user, config.plex_password)
         self.plex = self.connect_to_server()
-
 
     def download_album_art(self, url):
         """
@@ -47,12 +48,7 @@ class PlexNowPlaying:
         :param url: full Plex URL
         :return: None
         """
-        headers = {
-            'X-Plex-Client-Identifier': 'Plex InfluxDB Collector',
-            'X-Plex-Product': 'Plex InfluxDB Collector',
-            'X-Plex-Version': '1',
-            'X-Plex-Token': self.token
-        }
+        headers = self.get_default_headers()
         log.debug('Attempting to download album art from %s', url)
         result = requests.get(url, headers=headers)
         if result.status_code != 200:
@@ -63,7 +59,7 @@ class PlexNowPlaying:
         try:
             with open(file_name, 'wb') as f:
                 f.write(result.content)
-            log.debug('Successfully saved album art')
+            log.info('Successfully updated album art')
             self.resize_album_art(file_name)
         except Exception as e:
             log.exception('Failed to save album art', exc_info=True)
@@ -130,10 +126,17 @@ class PlexNowPlaying:
         """
         out_string = '{} - {}'.format(data['artist'], data['title'])
         now_playing = os.path.join(config.monitor_directory, config.playing_file)
+
+        with open(now_playing, 'r') as f:
+            content = f.read()
+            if content == out_string:
+                log.debug('Skipping now playing update')
+                return
+
         try:
             with open(now_playing, 'w') as f:
                 f.write(out_string)
-                log.debug('Successfully wrote now playing file')
+                log.info('Set Now Playing To %s', out_string)
         except Exception as e:
             log.exception('Failed to write now playing file', exc_info=True)
 
@@ -144,47 +147,25 @@ class PlexNowPlaying:
         pass
 
     def connect_to_server(self):
+        """
+        Create a PlexServer object with an active connection to the server and return the object
+        :return: PlexServer
+        """
         if not self.token:
             log.error('No API token currently set')
             return
         base_url = 'http://{}:32400'.format(config.plex_server)
         plex = PlexServer(base_url, self.get_auth_token(config.plex_user, config.plex_password))
-
         return plex
 
-    def _set_default_headers(self, req, token=None):
-        """
-        Sets the default headers need for a request
-        :param req:
-        :return: request
-        """
+    def get_auth_token(self, username, password):
 
-        log.debug('Adding Request Headers')
+        if self.token:
+            return self.token
 
-        headers = {
-            'X-Plex-Client-Identifier': 'Plex InfluxDB Collector',
-            'X-Plex-Product': 'Plex InfluxDB Collector',
-            'X-Plex-Version': '1',
-            'X-Plex-Token': token
-        }
-
-        for k, v in headers.items():
-            if k == 'X-Plex-Token' and not token:  # Don't add token if we don't have it yet
-                continue
-
-            req.add_header(k, v)
-
-        return req
-
-    def get_auth_token_test(self, username, password):
-        headers = {
-            'X-Plex-Client-Identifier': 'Plex InfluxDB Collector',
-            'X-Plex-Product': 'Plex InfluxDB Collector',
-            'X-Plex-Version': '1'
-        }
-
+        headers = self.get_default_headers()
         try:
-            r = requests.post('https://plex.tv/users/sign_in.json', headers=headers, auth=HTTPBasicAuth(config.plex_user, config.plex_password))
+            r = requests.post('https://plex.tv/users/sign_in.json', headers=headers, auth=HTTPBasicAuth(username, password))
         except Exception as e:
             # TODO - More Specific exception
             log.exception('Error getting auth token', exc_info=True)
@@ -196,44 +177,25 @@ class PlexNowPlaying:
 
         return json.loads(r.text)['user']['authToken']
 
-    def get_auth_token(self, username, password):
+    def get_default_headers(self, token=None):
         """
-        Make a reqest to plex.tv to get an authentication token for future requests
-        :param username: Plex Username
-        :param password: Plex Password
-        :return: str
+        Return the default headers need to make a request to Plex.
+        :param token: Existing token
+        :return: dict
         """
 
-        log.info('Getting Auth Token For User {}'.format(username))
+        log.debug('Adding Request Headers')
 
-        auth_string = '{}:{}'.format(username, password)
-        base_auth = base64.encodebytes(bytes(auth_string, 'utf-8'))
-        req = Request('https://plex.tv/users/sign_in.json')
-        req = self._set_default_headers(req)
-        req.add_header('Authorization', 'Basic {}'.format(base_auth[:-1].decode('utf-8')))
+        headers = {
+            'X-Plex-Client-Identifier': 'Plex InfluxDB Collector',
+            'X-Plex-Product': 'Plex InfluxDB Collector',
+            'X-Plex-Version': '1'
+        }
 
-        try:
-            result = urlopen(req, data=b'').read()
-        except HTTPError as e:
-            print('Failed To Get Authentication Token')
-            if e.code == 401:
-                log.error('Failed to get token due to bad username/password')
-            else:
-                print('Maybe this will help:')
-                print(e)
-                log.error('Failed to get authentication token.  No idea why')
-            sys.exit(1)
+        if token:
+            headers['X-Plex-Token'] = token
 
-        output = json.loads(result.decode('utf-8'))
-
-        # Make sure we actually got a token back
-        if 'authToken' in output['user']:
-            log.debug('Successfully Retrieved Auth Token')
-            return output['user']['authToken']
-        else:
-            print('Something Broke \n We got a valid response but for some reason there\'s no auth token')
-            sys.exit(1)
-
+        return headers
 
     def run(self):
 
